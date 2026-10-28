@@ -50,6 +50,9 @@ export default function AdminPage() {
   const [uploadingLetter, setUploadingLetter] = useState<string | null>(null)
   const [voices, setVoices] = useState<Voice[]>([])
   const [voicesError, setVoicesError] = useState('')
+  const [bulkVoice, setBulkVoice] = useState('')
+  const [bulk, setBulk] = useState<{ kind: string; done: number; total: number; current: string; errors: string[]; finished: boolean } | null>(null)
+  const stopRef = useRef(false)
   const audioRef = useRef<HTMLInputElement>(null)
   const letterFileRef = useRef<HTMLInputElement>(null)
 
@@ -83,6 +86,24 @@ export default function AdminPage() {
     }
   }, [])
 
+  /** يضمن أن القاعدة فيها المحتوى الافتراضي قبل أي حفظ، وإلا لاختفى باقي المحتوى */
+  const ensureSeeded = useCallback(async () => {
+    if (!supabase) return
+    const { count } = await supabase.from('content').select('id', { count: 'exact', head: true })
+    if ((count ?? 0) === 0) { await seedDefaults(); setDbEmpty(false) }
+  }, [])
+
+  const ttsCall = useCallback(async (text: string, voiceId: string, contentId: string): Promise<string> => {
+    const r = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voiceId, contentId }),
+    })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) { const e = new Error(j.detail ? `${j.error} — ${j.detail}` : j.error || 'فشل التوليد') as Error & { status?: number }; e.status = r.status; throw e }
+    return j.url as string
+  }, [token])
+
   useEffect(() => {
     if (auth !== 'in') return
     reload()
@@ -115,6 +136,7 @@ export default function AdminPage() {
     if (!form.title.trim()) return
     setBusy('save')
     try {
+      await ensureSeeded()
       if (editItem) await updateContent(editItem.id, form); else await addContent(form)
       await reload(); setView('list'); notify(editItem ? '✅ تم التعديل' : '✅ تمت الإضافة')
     } catch (e) { notify(`⚠️ ${errMsg(e)}`) }
@@ -168,14 +190,8 @@ export default function AdminPage() {
     if (form.audioUrl && !confirm('يوجد صوت لهذه القصة. التوليد من جديد يستهلك رصيد ElevenLabs. هل تريد المتابعة؟')) return
     setBusy('tts')
     try {
-      const r = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: form.body, voiceId: form.voiceId, contentId: editItem?.id || 'new' }),
-      })
-      const j = await r.json()
-      if (!r.ok) throw new Error(j.detail ? `${j.error} — ${j.detail}` : j.error || 'فشل التوليد')
-      await setAudio(j.url); notify(`🎙️ تم توليد الصوت (${j.chars} حرفاً). اضغط حفظ لتثبيته`)
+      const url = await ttsCall(form.body!, form.voiceId!, editItem?.id || 'new')
+      await setAudio(url); notify(`🎙️ تم توليد الصوت (${form.body!.length} حرفاً). اضغط حفظ لتثبيته`)
     } catch (e) { notify(`⚠️ ${errMsg(e)}`) }
     setBusy(null)
   }
@@ -196,6 +212,50 @@ export default function AdminPage() {
 
   const removeLetter = async (id: string) => {
     try { await saveLetterAudioRemote(id, null); setLetterAudio(id, null); setLetterAudioMap(getLetterAudio()) } catch (e) { notify(`⚠️ ${errMsg(e)}`) }
+  }
+
+  // ── التوليد الجماعي ─────────────────────────────────────
+  // القرآن مستثنى عمداً: التلاوة تُرفع بصوت قارئ حقيقي وليس بصوت اصطناعي.
+  const todoStories = items.filter(i => i.category !== 'quran' && i.body?.trim() && !i.audioUrl)
+  const todoStoryChars = todoStories.reduce((a, i) => a + (i.body?.length || 0), 0)
+  const todoLetters = arabicLetters.filter(l => !letterAudio[l.id])
+
+  const runBulk = async (kind: 'stories' | 'letters') => {
+    if (!bulkVoice) { notify('اختاري الصوت أولاً'); return }
+    const total = kind === 'stories' ? todoStories.length : todoLetters.length
+    if (!total) return
+    const chars = kind === 'stories' ? todoStoryChars : todoLetters.reduce((a, l) => a + l.name.length, 0)
+    if (!confirm(`سيتم توليد ${total} ملفاً صوتياً (حوالي ${chars.toLocaleString('ar-EG')} حرفاً) وسيُخصم من رصيد ElevenLabs. المتابعة؟`)) return
+    stopRef.current = false
+    const st = { kind, done: 0, total, current: '', errors: [] as string[], finished: false }
+    setBulk({ ...st })
+    try { if (kind === 'stories') await ensureSeeded() } catch (e) { notify(`⚠️ ${errMsg(e)}`); setBulk(null); return }
+
+    const jobs = kind === 'stories'
+      ? todoStories.map(i => ({ id: i.id, label: i.title, run: async () => {
+          const url = await ttsCall(i.body!, bulkVoice, i.id)
+          const dur = await audioDuration(url)
+          await updateContent(i.id, { audioUrl: url, voiceId: bulkVoice, ...(dur ? { duration: dur } : {}) })
+        } }))
+      : todoLetters.map(l => ({ id: l.id, label: `حرف ${l.name}`, run: async () => {
+          const url = await ttsCall(l.name, bulkVoice, `letter-${l.id}`)
+          await saveLetterAudioRemote(l.id, url); setLetterAudio(l.id, url)
+        } }))
+
+    for (const job of jobs) {
+      if (stopRef.current) break
+      st.current = job.label; setBulk({ ...st })
+      try { await job.run(); st.done++ }
+      catch (e) {
+        const err = e as Error & { status?: number }
+        st.errors.push(`${job.label}: ${err.message.slice(0, 120)}`)
+        // رصيد منتهٍ أو مفتاح خاطئ أو ضغط زائد: لا فائدة من المتابعة
+        if (err.status === 401 || err.status === 402 || err.status === 429 || err.status === 502) { setBulk({ ...st, finished: true }); break }
+      }
+      setBulk({ ...st })
+    }
+    st.current = ''; setBulk({ ...st, finished: true })
+    setLetterAudioMap(getLetterAudio()); await reload()
   }
 
   // ── تصدير/استيراد ───────────────────────────────────────
@@ -469,6 +529,44 @@ export default function AdminPage() {
         <label className="flex-1 btn-press py-2.5 rounded-xl bg-white text-gray-600 text-xs shadow-sm text-center cursor-pointer">📤 استيراد<input type="file" accept=".json" onChange={handleImport} className="hidden" /></label>
         <button onClick={handleReset} className="flex-1 btn-press py-2.5 rounded-xl bg-white text-gray-400 text-xs shadow-sm">🔄 افتراضي</button>
       </div>
+
+      {isSupabaseConfigured && (
+        <div className="mx-5 mb-4 rounded-2xl bg-white p-4 shadow-sm">
+          <p className="font-bold text-gray-800 text-sm mb-1">🎙️ توليد جماعي بصوت ElevenLabs</p>
+          <p className="text-[11px] text-gray-400 mb-3">يولّد صوتاً لكل قصة ليس لها ملف صوتي، فيحل محل القراءة الآلية. القرآن مستثنى.</p>
+          {voices.length === 0 ? (
+            <button onClick={loadVoicesList} disabled={busy === 'voices'} className="w-full py-2.5 rounded-xl bg-purple-50 text-purple-700 text-sm font-bold btn-press">{busy === 'voices' ? '⏳ جاري التحميل...' : '📥 تحميل أصواتي من ElevenLabs'}</button>
+          ) : (
+            <>
+              <select value={bulkVoice} onChange={e => setBulkVoice(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm mb-2 focus:outline-none">
+                <option value="">— اختاري الصوت —</option>
+                {voices.map(v => <option key={v.id} value={v.id}>{v.name}{v.meta ? ` (${v.meta})` : ''}</option>)}
+              </select>
+              {bulkVoice && voices.find(v => v.id === bulkVoice)?.preview && <audio controls src={voices.find(v => v.id === bulkVoice)!.preview} className="w-full h-8 mb-2" />}
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => runBulk('stories')} disabled={!!bulk && !bulk.finished || !bulkVoice || todoStories.length === 0}
+                  className="py-2.5 rounded-xl text-white text-xs font-bold btn-press" style={{ background: !bulkVoice || todoStories.length === 0 || (!!bulk && !bulk.finished) ? '#9CA3AF' : '#5C35BF' }}>
+                  📚 القصص ({todoStories.length})
+                </button>
+                <button onClick={() => runBulk('letters')} disabled={!!bulk && !bulk.finished || !bulkVoice || todoLetters.length === 0}
+                  className="py-2.5 rounded-xl text-white text-xs font-bold btn-press" style={{ background: !bulkVoice || todoLetters.length === 0 || (!!bulk && !bulk.finished) ? '#9CA3AF' : '#7C3AED' }}>
+                  🔤 الحروف ({todoLetters.length})
+                </button>
+              </div>
+              {todoStories.length > 0 && <p className="text-[11px] text-gray-400 mt-2">القصص: حوالي {todoStoryChars.toLocaleString('ar-EG')} حرفاً</p>}
+            </>
+          )}
+          {voicesError && <p className="text-xs text-red-500 mt-2">{voicesError}</p>}
+          {bulk && (
+            <div className="mt-3">
+              <div className="flex justify-between text-xs text-gray-500 mb-1"><span>{bulk.finished ? (bulk.errors.length ? 'انتهى مع أخطاء' : '✅ اكتمل') : `⏳ ${bulk.current}`}</span><span>{bulk.done}/{bulk.total}</span></div>
+              <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all" style={{ width: `${(bulk.done / Math.max(bulk.total, 1)) * 100}%`, background: bulk.errors.length ? '#F59E0B' : '#5C35BF' }} /></div>
+              {!bulk.finished && <button onClick={() => { stopRef.current = true }} className="mt-2 text-xs text-red-500 font-semibold btn-press">⏹ إيقاف بعد الملف الحالي</button>}
+              {bulk.errors.length > 0 && <div className="mt-2 rounded-lg bg-red-50 p-2 max-h-28 overflow-y-auto">{bulk.errors.map((e, i) => <p key={i} className="text-[11px] text-red-600">{e}</p>)}</div>}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="px-5 space-y-2">
         {filtered.length === 0 ? (
