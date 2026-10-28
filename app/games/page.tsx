@@ -6,6 +6,7 @@ import BottomNav from '@/components/BottomNav'
 import MiniPlayer from '@/components/MiniPlayer'
 import TracingCanvas from '@/components/TracingCanvas'
 import { arabicLetters, spellingWords } from '@/lib/letters'
+import { CapitalsGame, EnglishListenGame, EnglishSpellGame, FlagsGame, MathRaceGame } from '@/components/games/extra'
 import { speak } from '@/lib/speech'
 import { addStars, getStars, markLetterWritten, recordGameWin } from '@/lib/store'
 
@@ -293,6 +294,11 @@ const GAMES = [
   { id: 'listen', title: 'أي حرف تسمع؟', desc: 'استمع واختر الحرف الصحيح', emoji: '👂', color: '#0891b2', stars: 24, tag: 'حروف' },
   { id: 'memory', title: 'بطاقات الذاكرة', desc: 'اوجد أزواج البطاقات', emoji: '🃏', color: '#7c3aed', stars: 20, tag: 'تركيز' },
   { id: 'count', title: 'عدّ واختر', desc: 'عدّ الأشياء واختر الرقم', emoji: '🔢', color: '#ea580c', stars: 20, tag: 'أرقام' },
+  { id: 'mathrace', title: 'سباق الحساب', desc: 'حل أسرع ما يمكن', emoji: '🏎️', color: '#059669', stars: 24, tag: 'حساب' },
+  { id: 'enlisten', title: 'Which letter?', desc: 'استمع واختر الحرف الإنجليزي', emoji: '👂', color: '#2563eb', stars: 24, tag: 'English' },
+  { id: 'enspell', title: 'Spell it!', desc: 'كوّن الكلمة الإنجليزية', emoji: '🔠', color: '#1d4ed8', stars: 30, tag: 'English' },
+  { id: 'capitals', title: 'ما العاصمة؟', desc: 'اختر عاصمة الدولة', emoji: '🏛️', color: '#0ea5e9', stars: 32, tag: 'دول' },
+  { id: 'flags', title: 'علم مَن؟', desc: 'تعرّف على أعلام الدول', emoji: '🚩', color: '#0284c7', stars: 32, tag: 'دول' },
 ]
 
 function GamesContent() {
@@ -309,6 +315,11 @@ function GamesContent() {
   if (active === 'listen') return wrap(<ListenGame onBack={back} />)
   if (active === 'memory') return wrap(<MemoryGame onBack={back} />)
   if (active === 'count') return wrap(<CountGame onBack={back} />)
+  if (active === 'mathrace') return wrap(<MathRaceGame onBack={back} />)
+  if (active === 'enlisten') return wrap(<EnglishListenGame onBack={back} />)
+  if (active === 'enspell') return wrap(<EnglishSpellGame onBack={back} />)
+  if (active === 'capitals') return wrap(<CapitalsGame onBack={back} />)
+  if (active === 'flags') return wrap(<FlagsGame onBack={back} />)
 
   return (
     <div className="min-h-screen bg-gray-50 pb-36">

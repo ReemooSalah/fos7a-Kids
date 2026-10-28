@@ -29,6 +29,14 @@ create table if not exists public.letter_audio (
   updated_at  timestamptz not null default now()
 );
 
+create table if not exists public.images (
+  key         text primary key,
+  url         text not null,
+  updated_at  timestamptz not null default now()
+);
+
+alter table public.content add column if not exists image_url text;
+
 create table if not exists public.admins (
   user_id uuid primary key references auth.users(id) on delete cascade
 );
@@ -48,6 +56,12 @@ $$;
 alter table public.content      enable row level security;
 alter table public.letter_audio enable row level security;
 alter table public.admins       enable row level security;
+alter table public.images       enable row level security;
+
+drop policy if exists "images read"  on public.images;
+drop policy if exists "images write" on public.images;
+create policy "images read"  on public.images for select to anon, authenticated using (true);
+create policy "images write" on public.images for all    to authenticated using (public.is_admin()) with check (public.is_admin());
 
 drop policy if exists "content read"   on public.content;
 drop policy if exists "content write"  on public.content;
@@ -66,6 +80,17 @@ create policy "admins self read" on public.admins for select to authenticated us
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('audio', 'audio', true, 52428800)
 on conflict (id) do update set public = true, file_size_limit = 52428800;
+
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('images', 'images', true, 10485760)
+on conflict (id) do update set public = true, file_size_limit = 10485760;
+
+drop policy if exists "images admin insert" on storage.objects;
+drop policy if exists "images admin update" on storage.objects;
+drop policy if exists "images admin delete" on storage.objects;
+create policy "images admin insert" on storage.objects for insert to authenticated with check (bucket_id = 'images' and public.is_admin());
+create policy "images admin update" on storage.objects for update to authenticated using (bucket_id = 'images' and public.is_admin());
+create policy "images admin delete" on storage.objects for delete to authenticated using (bucket_id = 'images' and public.is_admin());
 
 drop policy if exists "audio admin insert" on storage.objects;
 drop policy if exists "audio admin update" on storage.objects;

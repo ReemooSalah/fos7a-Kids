@@ -6,6 +6,10 @@ import { addContent, deleteContent, fileToDataUrl, loadContent, loadLetterAudio,
 import { categoryLabels, getColorFromGradient, type Category, type ContentItem } from '@/lib/data'
 import { arabicLetters } from '@/lib/letters'
 import { getLetterAudio, setLetterAudio, speak } from '@/lib/speech'
+import { getImages, loadImages, setImage, uploadImage, type ImageMap } from '@/lib/images'
+import { englishLetters } from '@/lib/english'
+import { countries } from '@/lib/countries'
+import { numbers } from '@/lib/numbers'
 import { audioDuration, isSupabaseConfigured, supabase, uploadAudio } from '@/lib/supabase'
 
 const ADMIN_PIN = '4444' // يُستخدم فقط عندما لا يكون Supabase مُعدّاً (وضع محلي)
@@ -21,10 +25,10 @@ const CATEGORIES = (Object.keys(categoryLabels) as Category[]).filter(c => c !==
 
 const EMPTY: Omit<ContentItem, 'id'> = {
   title: '', subtitle: '', category: 'prophets', duration: '5:00', ageMin: 3, ageMax: 12,
-  isPremium: false, emoji: '🎧', coverColor: 'from-purple-500 to-indigo-600', description: '', body: '', audioUrl: '', voiceId: '', isNew: true, isTrending: false,
+  isPremium: false, emoji: '🎧', coverColor: 'from-purple-500 to-indigo-600', description: '', body: '', audioUrl: '', voiceId: '', imageUrl: '', isNew: true, isTrending: false,
 }
 
-type View = 'list' | 'form' | 'letters'
+type View = 'list' | 'form' | 'letters' | 'images'
 type Auth = 'loading' | 'out' | 'in' | 'notadmin'
 interface Voice { id: string; name: string; category: string; meta: string; preview: string }
 
@@ -55,6 +59,12 @@ export default function AdminPage() {
   const stopRef = useRef(false)
   const audioRef = useRef<HTMLInputElement>(null)
   const letterFileRef = useRef<HTMLInputElement>(null)
+  const imageFileRef = useRef<HTMLInputElement>(null)
+  const coverFileRef = useRef<HTMLInputElement>(null)
+  const [imgs, setImgs] = useState<ImageMap>({})
+  const [imgKey, setImgKey] = useState<string | null>(null)
+  const [imgFilter, setImgFilter] = useState<'ar' | 'en' | 'country' | 'number'>('ar')
+  const [imgSearch, setImgSearch] = useState('')
 
   const notify = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 3200) }, [])
   const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'خطأ غير معروف')
@@ -108,6 +118,7 @@ export default function AdminPage() {
     if (auth !== 'in') return
     reload()
     loadLetterAudio().then(() => setLetterAudioMap(getLetterAudio()))
+    setImgs(getImages()); loadImages().then(setImgs)
   }, [auth, reload])
 
   const login = async () => {
@@ -256,6 +267,44 @@ export default function AdminPage() {
     }
     st.current = ''; setBulk({ ...st, finished: true })
     setLetterAudioMap(getLetterAudio()); await reload()
+  }
+
+  // ── الصور ───────────────────────────────────────────────
+  const imageItems: { key: string; label: string; sub: string; emoji: string }[] = (() => {
+    if (imgFilter === 'ar') return arabicLetters.flatMap(l => l.words.map(w => ({ key: `word:${w.word.replace(/[\u064B-\u0652]/g, '')}`, label: w.word, sub: `حرف ${l.name}`, emoji: w.emoji })))
+    if (imgFilter === 'en') return englishLetters.flatMap(l => l.words.map(w => ({ key: `en:${w.word.toLowerCase()}`, label: w.word, sub: w.ar, emoji: w.emoji })))
+    if (imgFilter === 'country') return countries.map(c => ({ key: `country:${c.code}`, label: c.name, sub: c.landmark, emoji: c.landmarkEmoji }))
+    return numbers.map(n => ({ key: `number:${n.n}`, label: `${n.n} — ${n.ar}`, sub: n.en, emoji: n.emoji }))
+  })()
+  const imageItemsFiltered = imageItems.filter(i => !imgSearch || i.label.includes(imgSearch) || i.sub.includes(imgSearch))
+  const imgCountFor = (keys: string[]) => keys.filter(k => imgs[k]).length
+
+  const handleImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; const key = imgKey
+    e.target.value = ''
+    if (!file || !key) return
+    if (!file.type.startsWith('image/')) { notify('⚠️ اختر ملف صورة'); return }
+    if (file.size > 5 * 1024 * 1024) { notify('⚠️ الصورة أكبر من 5MB'); return }
+    setBusy('image')
+    try {
+      const url = supabase ? await uploadImage(file, key) : await fileToDataUrl(file)
+      await setImage(key, url); setImgs({ ...getImages() }); notify('🖼️ تم حفظ الصورة')
+    } catch (er) { notify(`⚠️ ${errMsg(er)}`) }
+    setImgKey(null); setBusy(null)
+  }
+  const removeImage = async (key: string) => {
+    try { await setImage(key, null); setImgs({ ...getImages() }) } catch (e) { notify(`⚠️ ${errMsg(e)}`) }
+  }
+  const handleCoverFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; e.target.value = ''
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) { notify('⚠️ الصورة أكبر من 5MB'); return }
+    setBusy('cover')
+    try {
+      const url = supabase ? await uploadImage(file, `content-${editItem?.id || 'new'}`) : await fileToDataUrl(file)
+      setForm(f => ({ ...f, imageUrl: url })); notify('🖼️ تم رفع صورة الغلاف. اضغط حفظ')
+    } catch (er) { notify(`⚠️ ${errMsg(er)}`) }
+    setBusy(null)
   }
 
   // ── تصدير/استيراد ───────────────────────────────────────
@@ -441,6 +490,13 @@ export default function AdminPage() {
         <div className="bg-white rounded-2xl p-4 shadow-sm">
           <p className="text-xs font-bold text-gray-400 mb-3">الشكل</p>
           <Input label="الإيموجي" value={form.emoji} onChange={v => setForm(f => ({ ...f, emoji: v }))} placeholder="🎧" />
+          <label className="text-xs text-gray-500 font-semibold mb-2 mt-3 block">صورة الغلاف (اختيارية — تحل محل الإيموجي)</label>
+          <input ref={coverFileRef} type="file" accept="image/*" onChange={handleCoverFile} className="hidden" />
+          <div className="flex items-center gap-3">
+            {form.imageUrl ? <img src={form.imageUrl} alt="" className="w-16 h-16 rounded-xl object-cover" /> : <div className="w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center text-2xl">🖼️</div>}
+            <button onClick={() => coverFileRef.current?.click()} disabled={busy === 'cover'} className="flex-1 py-2.5 rounded-xl border-2 border-dashed border-gray-200 text-gray-500 text-sm btn-press">{busy === 'cover' ? '⏳ جاري الرفع...' : '📂 رفع صورة'}</button>
+            {form.imageUrl && <button onClick={() => setForm(f => ({ ...f, imageUrl: '' }))} className="text-red-400 text-sm px-2 btn-press">✕</button>}
+          </div>
           <label className="text-xs text-gray-500 font-semibold mb-2 mt-3 block">لون الغلاف</label>
           <div className="grid grid-cols-6 gap-2">
             {COVER_COLORS.map(c => (
@@ -476,6 +532,47 @@ export default function AdminPage() {
                 {url && <button onClick={() => new Audio(url).play()} className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center btn-press">▶</button>}
                 <button onClick={() => { setUploadingLetter(l.id); letterFileRef.current?.click() }} disabled={busy === 'letter'} className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center btn-press text-sm">📂</button>
                 {url && <button onClick={() => removeLetter(l.id)} className="w-9 h-9 rounded-xl bg-red-50 flex items-center justify-center btn-press text-sm">🗑️</button>}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      {toast && <Toast msg={toast} />}
+    </div>
+  )
+
+  // ── الصور ───────────────────────────────────────────────
+  if (view === 'images') return (
+    <div className="min-h-screen bg-gray-50 pb-10">
+      <div className="bg-white px-5 pt-12 pb-4 shadow-sm sticky top-0 z-10">
+        <div className="flex items-center gap-3 mb-3">
+          <button onClick={() => setView('list')} className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center btn-press">→</button>
+          <div className="flex-1"><h1 className="font-bold text-gray-900 text-lg">الصور الحقيقية 🖼️</h1><p className="text-xs text-gray-400">{Object.keys(imgs).length} صورة مرفوعة · تحل محل الإيموجي في التطبيق</p></div>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {([['ar', '🔤 كلمات عربية', arabicLetters.flatMap(l => l.words.map(w => `word:${w.word.replace(/[\u064B-\u0652]/g, '')}`))], ['en', '🔠 English', englishLetters.flatMap(l => l.words.map(w => `en:${w.word.toLowerCase()}`))], ['country', '🌍 الدول', countries.map(c => `country:${c.code}`)], ['number', '🔢 الأرقام', numbers.map(n => `number:${n.n}`)]] as const).map(([id, label, keys]) => (
+            <button key={id} onClick={() => setImgFilter(id)} className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-bold btn-press" style={{ background: imgFilter === id ? '#5C35BF' : '#F3F4F6', color: imgFilter === id ? 'white' : '#6B7280' }}>{label} ({imgCountFor([...keys])}/{keys.length})</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-2 mt-2"><span className="text-gray-400">🔍</span><input value={imgSearch} onChange={e => setImgSearch(e.target.value)} placeholder="ابحث..." className="flex-1 bg-transparent text-sm outline-none" /></div>
+      </div>
+      <input ref={imageFileRef} type="file" accept="image/*" onChange={handleImageFile} className="hidden" />
+      <div className="px-5 py-4">
+        <p className="text-xs text-gray-500 bg-blue-50 rounded-xl p-3 mb-4">💡 ارفع صورة واضحة (مربعة يُفضَّل، أقل من 5MB) لكل كلمة أو دولة. ما لا صورة له يُعرض بالإيموجي. تأكد أن الصور مرخّصة للاستخدام.</p>
+        <div className="grid grid-cols-2 gap-3">
+          {imageItemsFiltered.map(it => {
+            const url = imgs[it.key]
+            return (
+              <div key={it.key} className="bg-white rounded-2xl p-3 shadow-sm">
+                <div className="w-full aspect-square rounded-xl bg-gray-50 flex items-center justify-center text-5xl overflow-hidden mb-2">
+                  {url ? <img src={url} alt="" className="w-full h-full object-cover" /> : it.emoji}
+                </div>
+                <p className="font-bold text-gray-800 text-sm truncate">{it.label}</p>
+                <p className="text-[11px] text-gray-400 truncate mb-2">{it.sub}</p>
+                <div className="flex gap-1">
+                  <button onClick={() => { setImgKey(it.key); imageFileRef.current?.click() }} disabled={busy === 'image'} className="flex-1 py-2 rounded-lg bg-blue-50 text-blue-700 text-xs font-bold btn-press">{url ? '🔄 استبدال' : '📂 رفع'}</button>
+                  {url && <button onClick={() => removeImage(it.key)} className="px-3 py-2 rounded-lg bg-red-50 text-red-500 text-xs btn-press">🗑️</button>}
+                </div>
               </div>
             )
           })}
@@ -522,7 +619,8 @@ export default function AdminPage() {
 
       <div className="px-5 flex gap-2 mb-3">
         <button onClick={openAdd} className="flex-1 btn-press py-3 rounded-2xl text-white font-bold text-sm shadow-lg" style={{ background: 'linear-gradient(135deg, #5C35BF, #2D1B69)' }}>+ إضافة محتوى</button>
-        <button onClick={() => setView('letters')} className="btn-press px-4 py-3 rounded-2xl bg-white text-gray-700 text-sm shadow-sm font-bold">🔤 أصوات الحروف</button>
+        <button onClick={() => setView('letters')} className="btn-press px-3 py-3 rounded-2xl bg-white text-gray-700 text-sm shadow-sm font-bold">🔤 أصوات</button>
+        <button onClick={() => setView('images')} className="btn-press px-3 py-3 rounded-2xl bg-white text-gray-700 text-sm shadow-sm font-bold">🖼️ صور</button>
       </div>
       <div className="px-5 flex gap-2 mb-4">
         <button onClick={handleExport} className="flex-1 btn-press py-2.5 rounded-xl bg-white text-gray-600 text-xs shadow-sm">📥 تصدير JSON</button>

@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 
 const navItems = [
   { href: '/home', emoji: '🏠', label: 'الرئيسية' },
-  { href: '/letters', emoji: '🔤', label: 'الحروف' },
+  { href: '/learn', emoji: '📚', label: 'تعلّم' },
   { href: '/explore', emoji: '🔍', label: 'اكتشف' },
   { href: '/games', emoji: '🎮', label: 'ألعاب' },
   { href: '/rewards', emoji: '⭐', label: 'حسابي' },

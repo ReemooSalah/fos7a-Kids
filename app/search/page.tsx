@@ -6,6 +6,8 @@ import Link from 'next/link'
 import { getAllContent, loadContent } from '@/lib/contentStore'
 import { getColorFromGradient, type ContentItem } from '@/lib/data'
 import { arabicLetters } from '@/lib/letters'
+import { countries, flagUrl } from '@/lib/countries'
+import { englishLetters } from '@/lib/english'
 
 const TRENDING = ['قصص الأنبياء', 'حرف الباء', 'سورة الفاتحة', 'نشيد الحروف', 'سيدنا يوسف']
 
@@ -21,6 +23,8 @@ function SearchContent() {
   const norm = (s: string) => s.replace(/[ً-ْ]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه')
   const results = q.length > 1 ? all.filter(c => norm(c.title + ' ' + c.subtitle + ' ' + c.description + ' ' + (c.body || '')).includes(norm(q))) : []
   const letters = q.length > 0 ? arabicLetters.filter(l => l.char === q || l.name.includes(q) || norm(l.name).includes(norm(q)) || ('حرف ' + l.name).includes(q)) : []
+  const enLetters = /^[a-z]$/i.test(q) ? englishLetters.filter(l => l.id === q.toLowerCase()) : []
+  const foundCountries = q.length > 1 ? countries.filter(c => c.name.includes(q) || c.capital.includes(q) || c.en.toLowerCase().includes(q.toLowerCase())) : []
 
   const commit = (s: string) => {
     setQuery(s)
@@ -71,7 +75,13 @@ function SearchContent() {
                 </div>
               </div>
             )}
-            {results.length === 0 && letters.length === 0 ? (
+            {enLetters.length > 0 && (
+              <div><p className="text-gray-400 text-xs mb-2">English</p><div className="flex gap-2">{enLetters.map(l => <Link key={l.id} href={`/english/${l.id}`} className="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-2xl font-black btn-press" style={{ background: getColorFromGradient(l.color) }}>{l.upper}{l.lower}</Link>)}</div></div>
+            )}
+            {foundCountries.length > 0 && (
+              <div><p className="text-gray-400 text-xs mb-2">دول</p><div className="space-y-2">{foundCountries.slice(0, 5).map(c => <Link key={c.code} href={`/world/${c.code}`} className="flex gap-3 items-center p-3 bg-gray-50 rounded-2xl btn-press"><img src={flagUrl(c.code, 160)} alt="" className="h-8 rounded" /><div className="flex-1"><p className="font-semibold text-gray-800 text-sm">{c.name}</p><p className="text-gray-400 text-xs">🏛️ {c.capital}</p></div></Link>)}</div></div>
+            )}
+            {results.length === 0 && letters.length === 0 && enLetters.length === 0 && foundCountries.length === 0 ? (
               <div className="text-center py-16"><div className="text-5xl mb-3">🔍</div><p className="text-gray-400 text-sm">لا توجد نتائج لـ &quot;{q}&quot;</p></div>
             ) : results.length > 0 && (
               <div className="space-y-3">

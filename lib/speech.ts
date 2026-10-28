@@ -105,6 +105,24 @@ export function speak(text: string, opts: SpeakOptions = {}): SpeechSynthesisUtt
   return u
 }
 
+/** قراءة نص إنجليزي بصوت إنجليزي من النظام */
+export function speakEn(text: string, opts: SpeakOptions = {}): SpeechSynthesisUtterance | null {
+  if (!speechSupported()) { opts.onEnd?.(); return null }
+  window.speechSynthesis.cancel()
+  const settings = getVoiceSettings()
+  const u = new SpeechSynthesisUtterance(text)
+  const voices = window.speechSynthesis.getVoices()
+  const en = voices.find(v => /^en[-_]?(us|gb)?/i.test(v.lang) && /google|samantha|daniel|karen|moira|alex|natural/i.test(v.name)) || voices.find(v => v.lang.toLowerCase().startsWith('en'))
+  if (en) u.voice = en
+  u.lang = en?.lang || 'en-US'
+  u.rate = opts.rate ?? Math.min(settings.rate, 0.95)
+  u.pitch = opts.pitch ?? settings.pitch
+  u.onend = () => opts.onEnd?.()
+  u.onerror = () => opts.onEnd?.()
+  window.speechSynthesis.speak(u)
+  return u
+}
+
 // ── أصوات الحروف المرفوعة من الداشبورد ─────────────────────
 export type LetterAudioMap = Record<string, string>
 

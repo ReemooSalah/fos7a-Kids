@@ -5,7 +5,7 @@ import Link from 'next/link'
 import PageHeader from '@/components/PageHeader'
 import { getAllContent, loadContent } from '@/lib/contentStore'
 import { arabicLetters } from '@/lib/letters'
-import { getBadges, getDailyLogs, getHistory, getLetterProgress, getProfile, getStars, type ChildProfile, type DayLog } from '@/lib/store'
+import { getBadges, getDailyLogs, getHistory, getLearn, getLetterProgress, getProfile, getStars, type ChildProfile, type DayLog, type LearnProgress } from '@/lib/store'
 import type { ContentItem } from '@/lib/data'
 
 const DAY_NAMES = ['أحد', 'اثن', 'ثلا', 'أرب', 'خمي', 'جمع', 'سبت']
@@ -17,9 +17,10 @@ export default function ParentDashboardPage() {
   const [letters, setLetters] = useState({ learned: [] as string[], written: [] as string[] })
   const [stars, setStars] = useState(0)
   const [badgeCount, setBadgeCount] = useState(0)
+  const [learn, setLearn] = useState<LearnProgress | null>(null)
 
   useEffect(() => {
-    setProfile(getProfile()); setLogs(getDailyLogs()); setStars(getStars()); setBadgeCount(getBadges().length)
+    setProfile(getProfile()); setLogs(getDailyLogs()); setStars(getStars()); setBadgeCount(getBadges().length); setLearn(getLearn())
     const mapHistory = (all: ContentItem[]) => setHistory(getHistory().map(id => all.find(c => c.id === id)).filter(Boolean) as ContentItem[])
     mapHistory(getAllContent()); loadContent().then(mapHistory)
     setLetters(getLetterProgress())
@@ -73,7 +74,17 @@ export default function ParentDashboardPage() {
         </div>
 
         <div className="bg-white rounded-3xl p-5 shadow-sm">
-          <h2 className="font-bold text-gray-800 text-base mb-3">تقدّم الحروف</h2>
+          <h2 className="font-bold text-gray-800 text-base mb-3">التعلّم بالأرقام</h2>
+          <div className="grid grid-cols-2 gap-2">
+            {[{ l: 'حروف إنجليزية', v: `${learn?.english.learned.length ?? 0} / 26`, e: '🔠' }, { l: 'أرقام 0–20', v: `${learn?.numbers.filter(k => +k <= 20).length ?? 0} / 21`, e: '🔢' },
+              { l: 'مسائل حساب', v: `${learn?.math.correct ?? 0} صحيحة من ${learn?.math.solved ?? 0}`, e: '🧮' }, { l: 'دول تعرّف عليها', v: `${learn?.countries.length ?? 0}`, e: '🌍' }].map(s => (
+              <div key={s.l} className="bg-gray-50 rounded-2xl p-3"><p className="text-[11px] text-gray-400">{s.e} {s.l}</p><p className="font-bold text-gray-800 text-sm mt-0.5">{s.v}</p></div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-3xl p-5 shadow-sm">
+          <h2 className="font-bold text-gray-800 text-base mb-3">تقدّم الحروف العربية</h2>
           <div className="grid grid-cols-7 gap-1.5">
             {arabicLetters.map(l => {
               const learned = letters.learned.includes(l.id), written = letters.written.includes(l.id)

@@ -37,8 +37,8 @@ export default function ProphetsPage() {
               return (
                 <button key={item.id} onClick={() => router.push(`/content/${item.id}`)} className="w-full flex items-center gap-3 btn-press text-right">
                   <div className="relative flex-shrink-0">
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shadow-md" style={{ background: getColorFromGradient(item.coverColor) }}>
-                      {item.emoji}
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shadow-md overflow-hidden" style={{ background: getColorFromGradient(item.coverColor) }}>
+                      {item.imageUrl ? <img src={item.imageUrl} alt="" className="w-full h-full object-cover" /> : item.emoji}
                     </div>
                     <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-white text-[10px] font-black flex items-center justify-center shadow" style={{ color: '#5C35BF' }}>{i + 1}</span>
                     {done && <span className="absolute -bottom-1 -left-1 w-5 h-5 rounded-full bg-green-400 text-white text-[10px] flex items-center justify-center shadow">✓</span>}

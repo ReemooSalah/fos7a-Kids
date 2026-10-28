@@ -18,6 +18,7 @@ interface Row {
   is_premium: boolean | null; emoji: string | null; cover_color: string | null
   description: string | null; body: string | null; audio_url: string | null
   voice_id: string | null; sort_order: number | null; is_new: boolean | null; is_trending: boolean | null
+  image_url?: string | null
 }
 
 const fromRow = (r: Row): ContentItem => ({
@@ -25,7 +26,7 @@ const fromRow = (r: Row): ContentItem => ({
   duration: r.duration ?? '5:00', ageMin: r.age_min ?? 3, ageMax: r.age_max ?? 12,
   isPremium: !!r.is_premium, emoji: r.emoji ?? '🎧', coverColor: r.cover_color ?? 'from-purple-500 to-indigo-600',
   description: r.description ?? '', body: r.body ?? undefined, audioUrl: r.audio_url || undefined,
-  voiceId: r.voice_id || undefined, order: r.sort_order ?? undefined,
+  voiceId: r.voice_id || undefined, imageUrl: r.image_url || undefined, order: r.sort_order ?? undefined,
   isNew: !!r.is_new, isTrending: !!r.is_trending,
 })
 
@@ -34,7 +35,7 @@ const toRow = (i: ContentItem): Row => ({
   duration: i.duration || null, age_min: i.ageMin ?? null, age_max: i.ageMax ?? null,
   is_premium: !!i.isPremium, emoji: i.emoji || null, cover_color: i.coverColor || null,
   description: i.description || null, body: i.body || null, audio_url: i.audioUrl || null,
-  voice_id: i.voiceId || null, sort_order: i.order ?? null, is_new: !!i.isNew, is_trending: !!i.isTrending,
+  voice_id: i.voiceId || null, image_url: i.imageUrl || null, sort_order: i.order ?? null, is_new: !!i.isNew, is_trending: !!i.isTrending,
 })
 
 function readJson<T>(key: string): T | null {

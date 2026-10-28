@@ -100,6 +100,47 @@ export function markLetterWritten(id: string) {
   return false
 }
 
+// ── تقدّم الأقسام الأخرى (إنجليزي / أرقام / حساب / دول) ──
+export interface LearnProgress {
+  english: { learned: string[]; written: string[] }
+  numbers: string[]
+  countries: string[]
+  math: { solved: number; correct: number; byLevel: Record<string, { solved: number; correct: number }> }
+}
+const emptyLearn = (): LearnProgress => ({ english: { learned: [], written: [] }, numbers: [], countries: [], math: { solved: 0, correct: 0, byLevel: {} } })
+export const getLearn = () => ({ ...emptyLearn(), ...read<Partial<LearnProgress>>('fos7a_learn', {}) }) as LearnProgress
+function saveLearn(p: LearnProgress) { write('fos7a_learn', p) }
+
+export function markEnglish(id: string, kind: 'learned' | 'written') {
+  const p = getLearn()
+  if (p.english[kind].includes(id)) return false
+  p.english[kind].push(id); saveLearn(p)
+  if (p.english.learned.length >= 26) unlockBadge('english_all')
+  return true
+}
+export function markNumber(n: number) {
+  const p = getLearn(); const k = String(n)
+  if (p.numbers.includes(k)) return false
+  p.numbers.push(k); saveLearn(p)
+  if (p.numbers.length >= 21) unlockBadge('numbers_all')
+  return true
+}
+export function markCountry(code: string) {
+  const p = getLearn()
+  if (p.countries.includes(code)) return false
+  p.countries.push(code); saveLearn(p)
+  if (p.countries.length >= 10) unlockBadge('explorer')
+  return true
+}
+export function recordMath(levelId: string, correct: boolean) {
+  const p = getLearn()
+  p.math.solved++; if (correct) p.math.correct++
+  const l = p.math.byLevel[levelId] || { solved: 0, correct: 0 }
+  l.solved++; if (correct) l.correct++
+  p.math.byLevel[levelId] = l; saveLearn(p)
+  if (p.math.correct >= 50) unlockBadge('math_star')
+}
+
 // ── الألعاب ───────────────────────────────────────────────
 export function recordGameWin() {
   const wins = parseInt(localStorage.getItem('fos7a_game_wins') || '0', 10) + 1

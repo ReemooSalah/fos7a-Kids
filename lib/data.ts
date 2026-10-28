@@ -16,6 +16,8 @@ export interface ContentItem {
   audioUrl?: string
   /** معرّف صوت ElevenLabs المستخدم في توليد الملف الصوتي */
   voiceId?: string
+  /** صورة غلاف حقيقية (اختيارية) تحل محل الإيموجي */
+  imageUrl?: string
   /** نص القصة الكامل — يُقرأ بالصوت الآلي عند عدم وجود ملف صوتي */
   body?: string
   /** ترتيب زمني (لقصص الأنبياء) */
@@ -319,6 +321,10 @@ export const contentItems: ContentItem[] = [...prophetStories, ...otherContent]
 
 export const homeCategories: HomeCategory[] = [
   { id: 'letters', name: 'الحروف', emoji: '🔤', color: 'from-purple-400 to-indigo-600', href: '/letters' },
+  { id: 'english', name: 'English', emoji: '🔠', color: 'from-blue-400 to-indigo-600', href: '/english' },
+  { id: 'numbers', name: 'الأرقام', emoji: '🔢', color: 'from-pink-400 to-rose-600', href: '/numbers' },
+  { id: 'math', name: 'الحساب', emoji: '🧮', color: 'from-emerald-400 to-teal-600', href: '/math' },
+  { id: 'world', name: 'الدول', emoji: '🌍', color: 'from-cyan-400 to-blue-600', href: '/world' },
   { id: 'prophets', name: 'الأنبياء', emoji: '🌟', color: 'from-yellow-400 to-amber-500', href: '/prophets' },
   { id: 'stories', name: 'القصص', emoji: '📚', color: 'from-green-400 to-emerald-600', href: '/explore?category=stories' },
   { id: 'nasheeds', name: 'الأناشيد', emoji: '🎵', color: 'from-pink-400 to-rose-500', href: '/explore?category=nasheeds' },
@@ -336,6 +342,10 @@ export const badges: Badge[] = [
   { id: 'writer', name: 'الكاتب الصغير', emoji: '✏️', description: 'كتبت 10 حروف بيدك' },
   { id: 'game_master', name: 'بطل الألعاب', emoji: '🎮', description: 'فزت في 5 ألعاب' },
   { id: 'streak_7', name: 'أسبوع متواصل', emoji: '🔥', description: 'تعلمت 7 أيام متواصلة' },
+  { id: 'english_all', name: 'بطل ABC', emoji: '🔠', description: 'تعلمت كل الحروف الإنجليزية' },
+  { id: 'numbers_all', name: 'صديق الأرقام', emoji: '🔢', description: 'تعلمت الأرقام من 0 إلى 20' },
+  { id: 'math_star', name: 'نجم الحساب', emoji: '🧮', description: 'حللت 50 مسألة صحيحة' },
+  { id: 'explorer', name: 'الرحّالة', emoji: '🌍', description: 'تعرفت على 10 دول' },
 ]
 
 export const levels: Level[] = [

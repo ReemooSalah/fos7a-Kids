@@ -81,8 +81,8 @@ function ExploreContent() {
           <div className="space-y-3">
             {filtered.map(item => (
               <div key={item.id} className="bg-white rounded-2xl p-4 flex items-center gap-3 btn-press shadow-sm" onClick={() => router.push(`/content/${item.id}`)}>
-                <div className="w-16 h-16 rounded-xl flex items-center justify-center text-4xl flex-shrink-0 relative" style={{ background: getColorFromGradient(item.coverColor) }}>
-                  {item.emoji}
+                <div className="w-16 h-16 rounded-xl flex items-center justify-center text-4xl flex-shrink-0 relative overflow-hidden" style={{ background: getColorFromGradient(item.coverColor) }}>
+                  {item.imageUrl ? <img src={item.imageUrl} alt="" className="w-full h-full object-cover" /> : item.emoji}
                   {item.isPremium && !premium && <span className="absolute -top-1 -left-1 text-sm">🔒</span>}
                 </div>
                 <div className="flex-1 min-w-0">

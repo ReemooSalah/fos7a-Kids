@@ -53,8 +53,8 @@ export default function ContentDetailPage() {
       <div className="relative pt-12 pb-8 flex flex-col items-center" style={{ background: `linear-gradient(135deg, ${colors.from}, ${colors.to})` }}>
         <button onClick={() => router.back()} className="absolute top-12 right-5 w-9 h-9 bg-black/20 rounded-full flex items-center justify-center btn-press"><span className="text-white">→</span></button>
         <button onClick={() => setIsFav(toggleFavorite(item.id))} className="absolute top-12 left-5 w-9 h-9 bg-black/20 rounded-full flex items-center justify-center btn-press"><span className="text-lg">{isFav ? '❤️' : '🤍'}</span></button>
-        <div className="w-36 h-36 bg-white/20 rounded-3xl flex items-center justify-center text-7xl shadow-xl mt-4 relative">
-          {item.emoji}
+        <div className="w-36 h-36 bg-white/20 rounded-3xl flex items-center justify-center text-7xl shadow-xl mt-4 relative overflow-hidden">
+          {item.imageUrl ? <img src={item.imageUrl} alt="" className="w-full h-full object-cover" /> : item.emoji}
           {locked && <span className="absolute -bottom-2 -left-2 w-10 h-10 rounded-full bg-white flex items-center justify-center text-xl shadow">🔒</span>}
         </div>
         {item.isNew && <span className="mt-3 bg-white/20 text-white text-xs font-bold px-3 py-1 rounded-full">✨ جديد</span>}

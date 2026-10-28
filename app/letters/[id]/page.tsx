@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import TracingCanvas from '@/components/TracingCanvas'
+import Pic from '@/components/Pic'
 import { arabicLetters, letterById, letterIndex } from '@/lib/letters'
 import { getColorFromGradient, getCoverColors } from '@/lib/data'
 import { playLetterSound, speak, stopSpeaking } from '@/lib/speech'
@@ -153,7 +154,7 @@ export default function LetterPage() {
                 {letter.words.map(w => (
                   <div key={w.word} role="button" tabIndex={0} onClick={() => say('w-' + w.word, w.word)} className="w-full flex items-center gap-3 p-3 rounded-xl btn-press cursor-pointer"
                     style={{ background: speaking === 'w-' + w.word ? `${colors.from}22` : '#F9FAFB' }}>
-                    <span className="text-3xl">{w.emoji}</span>
+                    <Pic imageKey={`word:${w.word.replace(/[\u064B-\u0652]/g, '')}`} emoji={w.emoji} size={52} rounded="rounded-xl" />
                     <span className="flex-1 text-right text-xl font-black text-gray-800">
                       <span style={{ color: colors.to }}>{w.word[0]}</span>{w.word.slice(1)}
                     </span>

@@ -6,7 +6,7 @@ import { badges, levels } from '@/lib/data'
 import { arabicLetters } from '@/lib/letters'
 import BottomNav from '@/components/BottomNav'
 import MiniPlayer from '@/components/MiniPlayer'
-import { getBadges, getDailyLogs, getHistory, getLetterProgress, getProfile, getStars, isPremiumActive, type ChildProfile } from '@/lib/store'
+import { getBadges, getDailyLogs, getHistory, getLearn, getLetterProgress, getProfile, getStars, isPremiumActive, type ChildProfile, type LearnProgress } from '@/lib/store'
 
 export default function RewardsPage() {
   const [stars, setStars] = useState(0)
@@ -16,9 +16,10 @@ export default function RewardsPage() {
   const [listened, setListened] = useState(0)
   const [today, setToday] = useState({ listened: false, played: false, letter: false })
   const [premium, setPremium] = useState(false)
+  const [learn, setLearn] = useState<LearnProgress | null>(null)
 
   useEffect(() => {
-    setStars(getStars()); setUnlocked(getBadges()); setProfile(getProfile())
+    setStars(getStars()); setUnlocked(getBadges()); setProfile(getProfile()); setLearn(getLearn())
     const lp = getLetterProgress(); setLetters({ learned: lp.learned.length, written: lp.written.length })
     setListened(getHistory().length); setPremium(isPremiumActive())
     const t = new Date().toISOString().slice(0, 10)
@@ -66,7 +67,7 @@ export default function RewardsPage() {
 
       <div className="px-5 py-5 space-y-5">
         <div className="grid grid-cols-3 gap-3">
-          {[{ l: 'حروف تعلمتها', v: `${letters.learned}/28`, e: '🔤' }, { l: 'حروف كتبتها', v: letters.written, e: '✏️' }, { l: 'قصص سمعتها', v: listened, e: '🎧' }].map(s => (
+          {[{ l: 'حروف عربية', v: `${letters.learned}/28`, e: '🔤' }, { l: 'English', v: `${learn?.english.learned.length ?? 0}/26`, e: '🔠' }, { l: 'أرقام', v: `${learn?.numbers.filter(k => +k <= 20).length ?? 0}/21`, e: '🔢' }, { l: 'مسائل صحيحة', v: learn?.math.correct ?? 0, e: '🧮' }, { l: 'دول', v: learn?.countries.length ?? 0, e: '🌍' }, { l: 'قصص سمعتها', v: listened, e: '🎧' }].map(s => (
             <div key={s.l} className="bg-white rounded-2xl p-3 text-center shadow-sm"><div className="text-2xl">{s.e}</div><p className="font-black text-gray-800 text-lg">{s.v}</p><p className="text-gray-400 text-[10px] leading-tight">{s.l}</p></div>
           ))}
         </div>

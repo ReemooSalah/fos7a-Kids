@@ -8,6 +8,7 @@ import MiniPlayer from '@/components/MiniPlayer'
 import { homeCategories, getColorFromGradient, type ContentItem } from '@/lib/data'
 import { getAllContent, loadContent } from '@/lib/contentStore'
 import { arabicLetters } from '@/lib/letters'
+import Cover from '@/components/Cover'
 import { getLetterProgress, getProfile, getStars, isPremiumActive, type ChildProfile } from '@/lib/store'
 
 export default function HomePage() {
@@ -115,7 +116,7 @@ export default function HomePage() {
           <div className="space-y-3">
             {continueItems.map(item => (
               <div key={item.id} className="bg-white rounded-2xl p-4 flex items-center gap-3 btn-press shadow-sm" onClick={() => router.push(`/content/${item.id}`)}>
-                <div className="w-14 h-14 rounded-xl flex items-center justify-center text-3xl flex-shrink-0" style={{ background: getColorFromGradient(item.coverColor) }}>{item.emoji}</div>
+                <Cover item={item} size={56} className="rounded-xl flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-gray-800 text-sm truncate">{item.title}</p>
                   <p className="text-gray-500 text-xs">{item.subtitle} · {item.duration}</p>
@@ -156,8 +157,8 @@ export default function HomePage() {
         <div className="grid grid-cols-2 gap-3">
           {newest.map(item => (
             <div key={item.id} className="bg-white rounded-2xl overflow-hidden btn-press shadow-sm" onClick={() => router.push(`/content/${item.id}`)}>
-              <div className="h-24 flex items-center justify-center text-4xl relative" style={{ background: getColorFromGradient(item.coverColor) }}>
-                {item.emoji}
+              <div className="h-24 flex items-center justify-center text-4xl relative overflow-hidden" style={{ background: getColorFromGradient(item.coverColor) }}>
+                {item.imageUrl ? <img src={item.imageUrl} alt="" className="w-full h-full object-cover" /> : item.emoji}
                 {item.isPremium && !premium && <span className="absolute top-2 left-2 text-sm">🔒</span>}
               </div>
               <div className="p-3">
@@ -181,8 +182,8 @@ export default function HomePage() {
 function HCard({ item, onClick, locked }: { item: ContentItem; onClick: () => void; locked: boolean }) {
   return (
     <div className="flex-shrink-0 w-32 btn-press" onClick={onClick}>
-      <div className="w-full h-32 rounded-2xl flex items-center justify-center text-5xl shadow-md mb-2 relative" style={{ background: getColorFromGradient(item.coverColor) }}>
-        {item.emoji}
+      <div className="w-full h-32 rounded-2xl flex items-center justify-center text-5xl shadow-md mb-2 relative overflow-hidden" style={{ background: getColorFromGradient(item.coverColor) }}>
+        {item.imageUrl ? <img src={item.imageUrl} alt="" className="w-full h-full object-cover" /> : item.emoji}
         {locked && <span className="absolute top-2 left-2 text-sm">🔒</span>}
       </div>
       <p className="font-semibold text-gray-800 text-sm truncate">{item.title}</p>
