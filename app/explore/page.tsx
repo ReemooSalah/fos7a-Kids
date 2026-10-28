@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import BottomNav from '@/components/BottomNav'
 import MiniPlayer from '@/components/MiniPlayer'
 import { getColorFromGradient, type ContentItem } from '@/lib/data'
-import { getAllContent } from '@/lib/contentStore'
+import { getAllContent, loadContent } from '@/lib/contentStore'
 import { isPremiumActive } from '@/lib/store'
 
 const CATEGORIES = [
@@ -33,7 +33,7 @@ function ExploreContent() {
   const [items, setItems] = useState<ContentItem[]>([])
   const [premium, setPremium] = useState(false)
 
-  useEffect(() => { setItems(getAllContent()); setPremium(isPremiumActive()) }, [])
+  useEffect(() => { setItems(getAllContent()); loadContent().then(setItems); setPremium(isPremiumActive()) }, [])
 
   const filtered = items.filter(item => {
     if (item.category === 'letters') return false

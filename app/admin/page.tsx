@@ -1,14 +1,16 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { addContent, deleteContent, fileToDataUrl, getAllContent, resetContent, saveAllContent, updateContent } from '@/lib/contentStore'
+import { addContent, deleteContent, fileToDataUrl, loadContent, loadLetterAudio, resetContent, saveAllContent, saveLetterAudioRemote, seedDefaults, updateContent } from '@/lib/contentStore'
 import { categoryLabels, getColorFromGradient, type Category, type ContentItem } from '@/lib/data'
 import { arabicLetters } from '@/lib/letters'
 import { getLetterAudio, setLetterAudio, speak } from '@/lib/speech'
+import { audioDuration, isSupabaseConfigured, supabase, uploadAudio } from '@/lib/supabase'
 
-const ADMIN_PIN = '4444'
-const MAX_AUDIO_MB = 4
+const ADMIN_PIN = '4444' // يُستخدم فقط عندما لا يكون Supabase مُعدّاً (وضع محلي)
+const LOCAL_MAX_MB = 4
+const CLOUD_MAX_MB = 50
 
 const COVER_COLORS = [
   'from-green-400 to-emerald-600', 'from-blue-400 to-cyan-600', 'from-yellow-400 to-orange-500', 'from-pink-400 to-rose-600',
@@ -19,121 +21,246 @@ const CATEGORIES = (Object.keys(categoryLabels) as Category[]).filter(c => c !==
 
 const EMPTY: Omit<ContentItem, 'id'> = {
   title: '', subtitle: '', category: 'prophets', duration: '5:00', ageMin: 3, ageMax: 12,
-  isPremium: false, emoji: '🎧', coverColor: 'from-purple-500 to-indigo-600', description: '', body: '', audioUrl: '', isNew: true, isTrending: false,
+  isPremium: false, emoji: '🎧', coverColor: 'from-purple-500 to-indigo-600', description: '', body: '', audioUrl: '', voiceId: '', isNew: true, isTrending: false,
 }
 
 type View = 'list' | 'form' | 'letters'
+type Auth = 'loading' | 'out' | 'in' | 'notadmin'
+interface Voice { id: string; name: string; category: string; meta: string; preview: string }
 
 export default function AdminPage() {
   const router = useRouter()
+  const [auth, setAuth] = useState<Auth>('loading')
+  const [token, setToken] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [pin, setPin] = useState('')
-  const [authed, setAuthed] = useState(false)
-  const [pinError, setPinError] = useState(false)
+  const [loginError, setLoginError] = useState('')
   const [items, setItems] = useState<ContentItem[]>([])
+  const [dbEmpty, setDbEmpty] = useState(false)
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('all')
   const [view, setView] = useState<View>('list')
   const [editItem, setEditItem] = useState<ContentItem | null>(null)
   const [form, setForm] = useState<Omit<ContentItem, 'id'>>(EMPTY)
-  const [saving, setSaving] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [letterAudio, setLetterAudioMap] = useState<Record<string, string>>({})
   const [uploadingLetter, setUploadingLetter] = useState<string | null>(null)
+  const [voices, setVoices] = useState<Voice[]>([])
+  const [voicesError, setVoicesError] = useState('')
   const audioRef = useRef<HTMLInputElement>(null)
-  const importRef = useRef<HTMLInputElement>(null)
   const letterFileRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { if (sessionStorage.getItem('fos7a_admin_auth') === 'true') setAuthed(true) }, [])
-  useEffect(() => { if (authed) { setItems(getAllContent()); setLetterAudioMap(getLetterAudio()) } }, [authed])
+  const notify = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 3200) }, [])
+  const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'خطأ غير معروف')
 
-  const notify = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2000) }
-  const reload = () => setItems(getAllContent())
+  // ── المصادقة ────────────────────────────────────────────
+  useEffect(() => {
+    if (!supabase) {
+      setAuth(sessionStorage.getItem('fos7a_admin_auth') === 'true' ? 'in' : 'out')
+      return
+    }
+    const sb = supabase
+    const check = async (session: { access_token: string; user: { id: string } } | null) => {
+      if (!session) { setAuth('out'); setToken(''); return }
+      setToken(session.access_token)
+      const { data } = await sb.from('admins').select('user_id').eq('user_id', session.user.id).maybeSingle()
+      setAuth(data ? 'in' : 'notadmin')
+    }
+    sb.auth.getSession().then(({ data }) => check(data.session))
+    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => { check(session) })
+    return () => sub.subscription.unsubscribe()
+  }, [])
 
-  const login = () => {
-    if (pin === ADMIN_PIN) { setAuthed(true); sessionStorage.setItem('fos7a_admin_auth', 'true') }
-    else { setPinError(true); setTimeout(() => setPinError(false), 1200) }
+  const reload = useCallback(async () => {
+    const list = await loadContent()
+    setItems(list)
+    if (supabase) {
+      const { count } = await supabase.from('content').select('id', { count: 'exact', head: true })
+      setDbEmpty((count ?? 0) === 0)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (auth !== 'in') return
+    reload()
+    loadLetterAudio().then(() => setLetterAudioMap(getLetterAudio()))
+  }, [auth, reload])
+
+  const login = async () => {
+    setLoginError('')
+    if (!supabase) {
+      if (pin === ADMIN_PIN) { sessionStorage.setItem('fos7a_admin_auth', 'true'); setAuth('in') }
+      else { setLoginError('رمز خاطئ'); setTimeout(() => setLoginError(''), 1500) }
+      return
+    }
+    setBusy('login')
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+    setBusy(null)
+    if (error) setLoginError('البريد أو كلمة المرور غير صحيحة')
   }
-  const logout = () => { setAuthed(false); sessionStorage.removeItem('fos7a_admin_auth'); router.push('/home') }
 
+  const logout = async () => {
+    if (supabase) await supabase.auth.signOut(); else sessionStorage.removeItem('fos7a_admin_auth')
+    setAuth('out'); router.push('/home')
+  }
+
+  // ── المحتوى ─────────────────────────────────────────────
   const openAdd = () => { setEditItem(null); setForm(EMPTY); setView('form') }
   const openEdit = (it: ContentItem) => { setEditItem(it); setForm({ ...EMPTY, ...it }); setView('form') }
 
   const handleSave = async () => {
     if (!form.title.trim()) return
-    setSaving(true)
-    await new Promise(r => setTimeout(r, 300))
+    setBusy('save')
     try {
-      if (editItem) updateContent(editItem.id, form); else addContent(form)
-      reload(); setView('list'); notify(editItem ? '✅ تم التعديل' : '✅ تمت الإضافة')
-    } catch {
-      notify('⚠️ مساحة التخزين ممتلئة — استخدم رابط صوت بدلاً من رفع الملف')
-    }
-    setSaving(false)
+      if (editItem) await updateContent(editItem.id, form); else await addContent(form)
+      await reload(); setView('list'); notify(editItem ? '✅ تم التعديل' : '✅ تمت الإضافة')
+    } catch (e) { notify(`⚠️ ${errMsg(e)}`) }
+    setBusy(null)
   }
 
-  const handleDelete = (id: string) => { deleteContent(id); reload(); setDeleteConfirm(null); notify('🗑️ تم الحذف') }
+  const handleDelete = async (id: string) => {
+    try { await deleteContent(id); await reload(); notify('🗑️ تم الحذف') } catch (e) { notify(`⚠️ ${errMsg(e)}`) }
+    setDeleteConfirm(null)
+  }
+
+  const handleSeed = async () => {
+    setBusy('seed')
+    try { const n = await seedDefaults(); await reload(); notify(`✅ رُفع ${n} عنصراً إلى قاعدة البيانات`) } catch (e) { notify(`⚠️ ${errMsg(e)}`) }
+    setBusy(null)
+  }
+
+  const setAudio = async (url: string) => {
+    setForm(f => ({ ...f, audioUrl: url }))
+    const d = await audioDuration(url)
+    if (d) setForm(f => ({ ...f, duration: d }))
+  }
 
   const handleAudioFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return
-    if (file.size > MAX_AUDIO_MB * 1024 * 1024) { notify(`⚠️ الملف أكبر من ${MAX_AUDIO_MB}MB — ارفعه على رابط خارجي وضع الرابط`); return }
-    const url = await fileToDataUrl(file)
-    // حساب المدة
-    const a = new Audio(url)
-    a.onloadedmetadata = () => {
-      const s = Math.round(a.duration)
-      setForm(f => ({ ...f, audioUrl: url, duration: `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }))
-    }
-    a.onerror = () => setForm(f => ({ ...f, audioUrl: url }))
-    notify('🎵 تم تحميل الملف الصوتي')
-  }
-
-  const handleLetterFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file || !uploadingLetter) return
-    if (file.size > 1024 * 1024) { notify('⚠️ ملف صوت الحرف يجب أن يكون أقل من 1MB'); return }
+    const file = e.target.files?.[0]; e.target.value = ''
+    if (!file) return
+    const max = supabase ? CLOUD_MAX_MB : LOCAL_MAX_MB
+    if (file.size > max * 1024 * 1024) { notify(`⚠️ الملف أكبر من ${max}MB`); return }
+    setBusy('upload')
     try {
-      const url = await fileToDataUrl(file)
-      setLetterAudio(uploadingLetter, url); setLetterAudioMap(getLetterAudio()); notify('✅ تم حفظ صوت الحرف')
-    } catch { notify('⚠️ فشل الحفظ') }
-    setUploadingLetter(null)
-    e.target.value = ''
+      const url = supabase ? await uploadAudio(file, 'content', editItem?.id || form.title || 'new') : await fileToDataUrl(file)
+      await setAudio(url); notify('🎵 تم رفع الملف الصوتي')
+    } catch (er) { notify(`⚠️ ${errMsg(er)}`) }
+    setBusy(null)
   }
 
+  // ── ElevenLabs ──────────────────────────────────────────
+  const loadVoicesList = async () => {
+    setVoicesError(''); setBusy('voices')
+    try {
+      const r = await fetch('/api/voices', { headers: { Authorization: `Bearer ${token}` } })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'فشل التحميل')
+      setVoices(j.voices); if (!j.voices.length) setVoicesError('لا توجد أصوات في حسابك')
+    } catch (e) { setVoicesError(errMsg(e)) }
+    setBusy(null)
+  }
+
+  const generateVoice = async () => {
+    if (!form.body?.trim() || !form.voiceId) return
+    if (form.audioUrl && !confirm('يوجد صوت لهذه القصة. التوليد من جديد يستهلك رصيد ElevenLabs. هل تريد المتابعة؟')) return
+    setBusy('tts')
+    try {
+      const r = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: form.body, voiceId: form.voiceId, contentId: editItem?.id || 'new' }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.detail ? `${j.error} — ${j.detail}` : j.error || 'فشل التوليد')
+      await setAudio(j.url); notify(`🎙️ تم توليد الصوت (${j.chars} حرفاً). اضغط حفظ لتثبيته`)
+    } catch (e) { notify(`⚠️ ${errMsg(e)}`) }
+    setBusy(null)
+  }
+
+  // ── أصوات الحروف ────────────────────────────────────────
+  const handleLetterFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; const id = uploadingLetter
+    e.target.value = ''
+    if (!file || !id) return
+    if (file.size > 2 * 1024 * 1024) { notify('⚠️ ملف صوت الحرف يجب أن يكون أقل من 2MB'); return }
+    setBusy('letter')
+    try {
+      const url = supabase ? await uploadAudio(file, 'letters', id) : await fileToDataUrl(file)
+      await saveLetterAudioRemote(id, url); setLetterAudio(id, url); setLetterAudioMap(getLetterAudio()); notify('✅ تم حفظ صوت الحرف')
+    } catch (er) { notify(`⚠️ ${errMsg(er)}`) }
+    setUploadingLetter(null); setBusy(null)
+  }
+
+  const removeLetter = async (id: string) => {
+    try { await saveLetterAudioRemote(id, null); setLetterAudio(id, null); setLetterAudioMap(getLetterAudio()) } catch (e) { notify(`⚠️ ${errMsg(e)}`) }
+  }
+
+  // ── تصدير/استيراد ───────────────────────────────────────
   const handleExport = () => {
-    const data = JSON.stringify({ content: getAllContent(), letterAudio: getLetterAudio() }, null, 2)
+    const data = JSON.stringify({ content: items, letterAudio: getLetterAudio() }, null, 2)
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }))
     a.download = `fos7a-content-${new Date().toISOString().slice(0, 10)}.json`; a.click()
   }
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return
+    const file = e.target.files?.[0]; e.target.value = ''
+    if (!file) return
     const reader = new FileReader()
-    reader.onload = ev => {
+    reader.onload = async ev => {
       try {
         const data = JSON.parse(ev.target?.result as string)
-        if (Array.isArray(data)) saveAllContent(data)
-        else if (data.content) { saveAllContent(data.content); if (data.letterAudio) localStorage.setItem('fos7a_letter_audio', JSON.stringify(data.letterAudio)) }
-        reload(); setLetterAudioMap(getLetterAudio()); notify('📥 تم الاستيراد')
-      } catch { notify('⚠️ ملف غير صالح') }
+        const list = Array.isArray(data) ? data : data.content
+        if (!Array.isArray(list)) throw new Error('ملف غير صالح')
+        await saveAllContent(list); await reload(); notify('📥 تم الاستيراد')
+      } catch (er) { notify(`⚠️ ${errMsg(er)}`) }
     }
     reader.readAsText(file)
+  }
+
+  const handleReset = async () => {
+    if (!confirm(supabase ? 'سيُحذف كل المحتوى من قاعدة البيانات ويعود المحتوى الافتراضي المضمّن. متأكد؟' : 'إعادة المحتوى الافتراضي؟ ستُحذف التعديلات.')) return
+    try { await resetContent(); await reload(); notify('🔄 تمت الإعادة') } catch (e) { notify(`⚠️ ${errMsg(e)}`) }
   }
 
   const filtered = items.filter(i => (catFilter === 'all' || i.category === catFilter) && (!search || (i.title + i.subtitle).includes(search)))
   const stats = { total: items.length, premium: items.filter(i => i.isPremium).length, audio: items.filter(i => i.audioUrl).length, text: items.filter(i => i.body).length }
 
-  // ── PIN ─────────────────────────────────────────────────
-  if (!authed) return (
+  // ── شاشات الدخول ────────────────────────────────────────
+  if (auth === 'loading') return <div className="min-h-screen flex items-center justify-center" style={{ background: '#1E0A4A' }}><div className="text-4xl animate-spin">🎧</div></div>
+
+  if (auth === 'notadmin') return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 text-center" style={{ background: 'linear-gradient(135deg, #1E0A4A, #5C35BF)' }}>
+      <div className="text-6xl mb-4">⛔</div>
+      <h1 className="text-white font-bold text-xl mb-2">هذا الحساب ليس مشرفاً</h1>
+      <p className="text-white/70 text-sm mb-6 max-w-xs">سجّلتِ الدخول بنجاح، لكن الحساب غير مضاف في جدول المشرفين. شغّلي ملف <b>supabase/make-admin.sql</b> في Supabase.</p>
+      <button onClick={logout} className="px-6 py-3 rounded-2xl bg-white text-gray-800 font-bold btn-press">تسجيل الخروج</button>
+    </div>
+  )
+
+  if (auth === 'out') return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ background: 'linear-gradient(135deg, #1E0A4A, #5C35BF)' }}>
       <div className="text-6xl mb-4">🔐</div>
       <h1 className="text-white font-bold text-2xl mb-2">لوحة التحكم</h1>
-      <p className="text-white/60 text-sm mb-8">أدخل رمز ولي الأمر للدخول</p>
+      <p className="text-white/60 text-sm mb-8">{isSupabaseConfigured ? 'سجّل دخول المشرف' : 'أدخل رمز ولي الأمر للدخول'}</p>
       <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl">
-        <input type="password" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value)} onKeyDown={e => e.key === 'Enter' && login()} maxLength={6} autoFocus dir="ltr"
-          className={`w-full text-center text-3xl font-bold border-2 rounded-2xl py-4 outline-none mb-4 ${pinError ? 'border-red-400 bg-red-50 shake' : 'border-gray-200'}`} style={{ letterSpacing: 8 }} placeholder="••••" />
-        <button onClick={login} className="w-full py-3 rounded-2xl text-white font-bold btn-press" style={{ background: '#5C35BF' }}>دخول</button>
-        <p className="text-center text-gray-400 text-xs mt-3">الرمز الافتراضي: 4444</p>
+        {isSupabaseConfigured ? (
+          <div className="space-y-3 mb-4">
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="البريد الإلكتروني" dir="ltr" autoComplete="email"
+              className="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-sm text-left outline-none focus:border-purple-400" />
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && login()} placeholder="كلمة المرور" autoComplete="current-password"
+              className="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-sm outline-none focus:border-purple-400" />
+          </div>
+        ) : (
+          <input type="password" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value)} onKeyDown={e => e.key === 'Enter' && login()} maxLength={6} autoFocus dir="ltr"
+            className={`w-full text-center text-3xl font-bold border-2 rounded-2xl py-4 outline-none mb-4 ${loginError ? 'border-red-400 bg-red-50 shake' : 'border-gray-200'}`} style={{ letterSpacing: 8 }} placeholder="••••" />
+        )}
+        {loginError && <p className="text-red-500 text-sm text-center mb-3">{loginError}</p>}
+        <button onClick={login} disabled={busy === 'login'} className="w-full py-3 rounded-2xl text-white font-bold btn-press" style={{ background: busy === 'login' ? '#9CA3AF' : '#5C35BF' }}>{busy === 'login' ? '...' : 'دخول'}</button>
+        {!isSupabaseConfigured && <p className="text-center text-gray-400 text-xs mt-3">وضع محلي — الرمز الافتراضي: 4444</p>}
         <button onClick={() => router.back()} className="w-full mt-2 py-2 text-gray-400 text-xs btn-press">رجوع</button>
       </div>
     </div>
@@ -147,14 +274,14 @@ export default function AdminPage() {
     </div>
   )
 
-  // ── Form ────────────────────────────────────────────────
+  // ── نموذج الإضافة/التعديل ───────────────────────────────
   if (view === 'form') return (
     <div className="min-h-screen bg-gray-50 pb-10">
       <div className="bg-white px-5 pt-12 pb-4 shadow-sm flex items-center gap-3 sticky top-0 z-10">
         <button onClick={() => setView('list')} className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center btn-press">→</button>
         <h1 className="font-bold text-gray-900 text-lg flex-1">{editItem ? 'تعديل المحتوى' : 'إضافة محتوى جديد'}</h1>
-        <button onClick={handleSave} disabled={saving || !form.title.trim()} className="btn-press px-5 py-2 rounded-xl text-white font-bold text-sm" style={{ background: saving || !form.title.trim() ? '#9CA3AF' : '#5C35BF' }}>
-          {saving ? '...' : 'حفظ'}
+        <button onClick={handleSave} disabled={!!busy || !form.title.trim()} className="btn-press px-5 py-2 rounded-xl text-white font-bold text-sm" style={{ background: busy || !form.title.trim() ? '#9CA3AF' : '#5C35BF' }}>
+          {busy === 'save' ? '...' : 'حفظ'}
         </button>
       </div>
 
@@ -175,25 +302,57 @@ export default function AdminPage() {
 
         <div className="bg-white rounded-2xl p-4 shadow-sm">
           <p className="text-xs font-bold text-gray-400 mb-1">📜 نص القصة الكامل</p>
-          <p className="text-[11px] text-gray-400 mb-2">يُقرأ بالصوت الآلي عند عدم وجود ملف صوتي، ويظهر للطفل في صفحة المحتوى.</p>
-          <textarea value={form.body || ''} onChange={e => setForm(f => ({ ...f, body: e.target.value }))} rows={7} placeholder="اكتب القصة هنا... افصل الجمل بنقطة ليقرأها المشغّل جملة جملة."
+          <p className="text-[11px] text-gray-400 mb-2">يُقرأ بالصوت الآلي عند عدم وجود ملف صوتي، ويُستخدم لتوليد الصوت بـ ElevenLabs.</p>
+          <textarea value={form.body || ''} onChange={e => setForm(f => ({ ...f, body: e.target.value }))} rows={7} placeholder="اكتب القصة هنا... افصل الجمل بنقطة."
             className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm leading-relaxed focus:outline-none focus:border-purple-400 resize-y" />
-          {form.body && <button onClick={() => speak(form.body!.split('.')[0])} className="mt-2 text-xs font-semibold btn-press" style={{ color: '#5C35BF' }}>🔊 اسمع أول جملة بالصوت الآلي</button>}
+          <div className="flex justify-between mt-1">
+            <span className="text-[11px] text-gray-400">{(form.body || '').length} حرفاً</span>
+            {form.body && <button onClick={() => speak(form.body!.split('.')[0])} className="text-xs font-semibold btn-press" style={{ color: '#5C35BF' }}>🔊 اسمع أول جملة</button>}
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl p-4 shadow-sm">
-          <p className="text-xs font-bold text-gray-400 mb-3">🎙️ الملف الصوتي</p>
+          <p className="text-xs font-bold text-gray-400 mb-3">🎙️ الصوت</p>
+
+          {isSupabaseConfigured && (
+            <div className="rounded-xl bg-purple-50 p-3 mb-4">
+              <p className="text-xs font-bold text-purple-800 mb-2">توليد بـ ElevenLabs</p>
+              {voices.length === 0 ? (
+                <button onClick={loadVoicesList} disabled={busy === 'voices'} className="w-full py-2.5 rounded-xl bg-white text-purple-700 text-sm font-bold btn-press">
+                  {busy === 'voices' ? '⏳ جاري التحميل...' : '📥 تحميل أصواتي من ElevenLabs'}
+                </button>
+              ) : (
+                <>
+                  <select value={form.voiceId || ''} onChange={e => setForm(f => ({ ...f, voiceId: e.target.value }))} className="w-full border border-purple-200 bg-white rounded-xl px-3 py-2.5 text-sm mb-2 focus:outline-none">
+                    <option value="">— اختر الصوت —</option>
+                    {voices.map(v => <option key={v.id} value={v.id}>{v.name}{v.meta ? ` (${v.meta})` : ''}</option>)}
+                  </select>
+                  {form.voiceId && voices.find(v => v.id === form.voiceId)?.preview && (
+                    <audio controls src={voices.find(v => v.id === form.voiceId)!.preview} className="w-full h-8 mb-2" />
+                  )}
+                  <button onClick={generateVoice} disabled={busy === 'tts' || !form.voiceId || !form.body?.trim()}
+                    className="w-full py-2.5 rounded-xl text-white text-sm font-bold btn-press" style={{ background: busy === 'tts' || !form.voiceId || !form.body?.trim() ? '#9CA3AF' : '#5C35BF' }}>
+                    {busy === 'tts' ? '⏳ جاري التوليد (قد يستغرق دقيقة)...' : '🎙️ ولّد الصوت من النص'}
+                  </button>
+                </>
+              )}
+              {voicesError && <p className="text-xs text-red-500 mt-2">{voicesError}</p>}
+            </div>
+          )}
+
           <Input label="رابط الصوت (mp3 / m4a)" value={form.audioUrl || ''} onChange={v => setForm(f => ({ ...f, audioUrl: v }))} placeholder="https://..." ltr />
           <p className="text-center text-gray-400 text-xs my-2">أو</p>
           <input ref={audioRef} type="file" accept="audio/*" onChange={handleAudioFile} className="hidden" />
-          <button onClick={() => audioRef.current?.click()} className="btn-press w-full py-3 rounded-xl border-2 border-dashed border-gray-200 text-gray-500 text-sm font-medium">📂 رفع ملف صوتي من الجهاز (حتى {MAX_AUDIO_MB}MB)</button>
+          <button onClick={() => audioRef.current?.click()} disabled={busy === 'upload'} className="btn-press w-full py-3 rounded-xl border-2 border-dashed border-gray-200 text-gray-500 text-sm font-medium">
+            {busy === 'upload' ? '⏳ جاري الرفع...' : `📂 رفع ملف صوتي (حتى ${supabase ? CLOUD_MAX_MB : LOCAL_MAX_MB}MB)`}
+          </button>
           {form.audioUrl && (
             <div className="mt-3 p-2 bg-green-50 rounded-xl flex items-center gap-2">
               <audio controls src={form.audioUrl} className="flex-1 h-9" />
               <button onClick={() => setForm(f => ({ ...f, audioUrl: '' }))} className="text-red-400 text-sm px-2 btn-press">✕</button>
             </div>
           )}
-          {!form.audioUrl && !form.body && <p className="text-[11px] text-amber-600 mt-2">⚠️ بدون صوت ولا نص سيُشغَّل المحتوى بشكل صامت (محاكاة)</p>}
+          {!form.audioUrl && !form.body && <p className="text-[11px] text-amber-600 mt-2">⚠️ بدون صوت ولا نص سيُشغَّل المحتوى بشكل صامت</p>}
         </div>
 
         <div className="bg-white rounded-2xl p-4 space-y-3 shadow-sm">
@@ -211,11 +370,12 @@ export default function AdminPage() {
             {form.category === 'prophets' && <Input label="الترتيب الزمني" type="number" value={form.order ?? ''} onChange={v => setForm(f => ({ ...f, order: v ? +v : undefined }))} placeholder="1" />}
           </div>
           <div className="grid grid-cols-3 gap-2 pt-1">
-            {([['isPremium', '👑 مميز'], ['isNew', '✨ جديد'], ['isTrending', '🔥 رائج']] as const).map(([key, label]) => (
+            {([['isPremium', '👑 مدفوع'], ['isNew', '✨ جديد'], ['isTrending', '🔥 رائج']] as const).map(([key, label]) => (
               <button key={key} onClick={() => setForm(f => ({ ...f, [key]: !f[key] }))} className="py-2 rounded-xl text-xs font-bold btn-press border-2"
                 style={{ background: form[key] ? '#5C35BF' : 'white', color: form[key] ? 'white' : '#6B7280', borderColor: form[key] ? '#5C35BF' : '#E5E7EB' }}>{label}</button>
             ))}
           </div>
+          <p className="text-[11px] text-gray-400">{form.isPremium ? '👑 هذا المحتوى للمشتركين فقط' : '🆓 هذا المحتوى مجاني للجميع'}</p>
         </div>
 
         <div className="bg-white rounded-2xl p-4 shadow-sm">
@@ -236,7 +396,7 @@ export default function AdminPage() {
     </div>
   )
 
-  // ── Letter audio ────────────────────────────────────────
+  // ── أصوات الحروف ────────────────────────────────────────
   if (view === 'letters') return (
     <div className="min-h-screen bg-gray-50 pb-10">
       <div className="bg-white px-5 pt-12 pb-4 shadow-sm flex items-center gap-3 sticky top-0 z-10">
@@ -245,20 +405,17 @@ export default function AdminPage() {
       </div>
       <input ref={letterFileRef} type="file" accept="audio/*" onChange={handleLetterFile} className="hidden" />
       <div className="px-5 py-4">
-        <p className="text-xs text-gray-500 bg-blue-50 rounded-xl p-3 mb-4">💡 ارفع تسجيلاً صوتياً قصيراً لكل حرف (أقل من 1MB). الحروف بدون تسجيل تُقرأ بالصوت الآلي المختار في الإعدادات.</p>
+        <p className="text-xs text-gray-500 bg-blue-50 rounded-xl p-3 mb-4">💡 ارفع تسجيلاً قصيراً لكل حرف (أقل من 2MB). الحروف بدون تسجيل تُقرأ بالصوت الآلي. يمكنك توليدها من ElevenLabs وتنزيلها ثم رفعها هنا.</p>
         <div className="space-y-2">
           {arabicLetters.map(l => {
             const url = letterAudio[l.id]
             return (
               <div key={l.id} className="bg-white rounded-2xl p-3 shadow-sm flex items-center gap-3">
                 <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl font-black text-white flex-shrink-0" style={{ background: getColorFromGradient(l.color) }}>{l.char}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-gray-800 text-sm">{l.name}</p>
-                  <p className="text-[11px] text-gray-400">{url ? '🎙️ صوت مسجّل' : '🗣️ صوت آلي'}</p>
-                </div>
+                <div className="flex-1 min-w-0"><p className="font-bold text-gray-800 text-sm">{l.name}</p><p className="text-[11px] text-gray-400">{url ? '🎙️ صوت مسجّل' : '🗣️ صوت آلي'}</p></div>
                 {url && <button onClick={() => new Audio(url).play()} className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center btn-press">▶</button>}
-                <button onClick={() => { setUploadingLetter(l.id); letterFileRef.current?.click() }} className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center btn-press text-sm">📂</button>
-                {url && <button onClick={() => { setLetterAudio(l.id, null); setLetterAudioMap(getLetterAudio()) }} className="w-9 h-9 rounded-xl bg-red-50 flex items-center justify-center btn-press text-sm">🗑️</button>}
+                <button onClick={() => { setUploadingLetter(l.id); letterFileRef.current?.click() }} disabled={busy === 'letter'} className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center btn-press text-sm">📂</button>
+                {url && <button onClick={() => removeLetter(l.id)} className="w-9 h-9 rounded-xl bg-red-50 flex items-center justify-center btn-press text-sm">🗑️</button>}
               </div>
             )
           })}
@@ -268,16 +425,16 @@ export default function AdminPage() {
     </div>
   )
 
-  // ── List ────────────────────────────────────────────────
+  // ── القائمة ─────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50 pb-10">
       <div className="bg-white px-5 pt-12 pb-4 shadow-sm sticky top-0 z-10">
         <div className="flex items-center justify-between mb-4">
-          <div><h1 className="text-xl font-bold text-gray-900">لوحة التحكم 🎛️</h1><p className="text-gray-400 text-xs">فسحة — إدارة المحتوى</p></div>
+          <div><h1 className="text-xl font-bold text-gray-900">لوحة التحكم 🎛️</h1><p className="text-gray-400 text-xs">{isSupabaseConfigured ? '☁️ متصل بقاعدة البيانات — المحتوى مشترك بين كل الأجهزة' : '📱 وضع محلي — المحتوى على هذا الجهاز فقط'}</p></div>
           <button onClick={logout} className="text-gray-400 text-xs border border-gray-200 px-3 py-1.5 rounded-xl btn-press">خروج</button>
         </div>
         <div className="grid grid-cols-4 gap-2 mb-4">
-          {[{ l: 'المحتوى', v: stats.total, e: '📚' }, { l: 'مميز', v: stats.premium, e: '👑' }, { l: 'بصوت', v: stats.audio, e: '🎙️' }, { l: 'بنص', v: stats.text, e: '📜' }].map(s => (
+          {[{ l: 'المحتوى', v: stats.total, e: '📚' }, { l: 'مدفوع', v: stats.premium, e: '👑' }, { l: 'بصوت', v: stats.audio, e: '🎙️' }, { l: 'بنص', v: stats.text, e: '📜' }].map(s => (
             <div key={s.l} className="bg-gray-50 rounded-2xl p-2 text-center"><div className="text-lg">{s.e}</div><div className="font-bold text-gray-800">{s.v}</div><div className="text-gray-400 text-[10px]">{s.l}</div></div>
           ))}
         </div>
@@ -286,6 +443,16 @@ export default function AdminPage() {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ابحث عن محتوى..." className="flex-1 bg-transparent text-sm text-gray-700 outline-none" />
         </div>
       </div>
+
+      {isSupabaseConfigured && dbEmpty && (
+        <div className="mx-5 mt-4 rounded-2xl bg-amber-50 border border-amber-200 p-4">
+          <p className="font-bold text-amber-900 text-sm mb-1">قاعدة البيانات فارغة</p>
+          <p className="text-amber-800 text-xs mb-3">المعروض الآن هو المحتوى المضمّن في التطبيق. ارفعه مرة واحدة إلى القاعدة لتتمكن من تعديله وإضافة الأصوات.</p>
+          <button onClick={handleSeed} disabled={busy === 'seed'} className="w-full py-2.5 rounded-xl text-white text-sm font-bold btn-press" style={{ background: busy === 'seed' ? '#9CA3AF' : '#D97706' }}>
+            {busy === 'seed' ? '⏳ جاري الرفع...' : '⬆️ رفع المحتوى الافتراضي إلى القاعدة'}
+          </button>
+        </div>
+      )}
 
       <div className="px-5 py-3 flex gap-2 overflow-x-auto">
         {[{ value: 'all', label: 'الكل' }, ...CATEGORIES].map(c => (
@@ -299,8 +466,8 @@ export default function AdminPage() {
       </div>
       <div className="px-5 flex gap-2 mb-4">
         <button onClick={handleExport} className="flex-1 btn-press py-2.5 rounded-xl bg-white text-gray-600 text-xs shadow-sm">📥 تصدير JSON</button>
-        <label className="flex-1 btn-press py-2.5 rounded-xl bg-white text-gray-600 text-xs shadow-sm text-center cursor-pointer">📤 استيراد<input ref={importRef} type="file" accept=".json" onChange={handleImport} className="hidden" /></label>
-        <button onClick={() => { if (confirm('إعادة المحتوى الافتراضي؟ ستُحذف التعديلات.')) { resetContent(); reload(); notify('🔄 تمت الإعادة') } }} className="flex-1 btn-press py-2.5 rounded-xl bg-white text-gray-400 text-xs shadow-sm">🔄 افتراضي</button>
+        <label className="flex-1 btn-press py-2.5 rounded-xl bg-white text-gray-600 text-xs shadow-sm text-center cursor-pointer">📤 استيراد<input type="file" accept=".json" onChange={handleImport} className="hidden" /></label>
+        <button onClick={handleReset} className="flex-1 btn-press py-2.5 rounded-xl bg-white text-gray-400 text-xs shadow-sm">🔄 افتراضي</button>
       </div>
 
       <div className="px-5 space-y-2">
@@ -315,7 +482,7 @@ export default function AdminPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <p className="font-bold text-gray-800 text-sm truncate">{item.title}</p>
-                {item.isPremium && <span className="text-[10px] bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded-full font-bold">مميز</span>}
+                {item.isPremium ? <span className="text-[10px] bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded-full font-bold">مدفوع</span> : <span className="text-[10px] bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full font-bold">مجاني</span>}
                 {item.body && <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-bold">نص</span>}
               </div>
               <p className="text-gray-400 text-xs">{categoryLabels[item.category]} · {item.duration} · {item.ageMin}-{item.ageMax} سنة</p>

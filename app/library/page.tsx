@@ -5,7 +5,7 @@ import Link from 'next/link'
 import BottomNav from '@/components/BottomNav'
 import MiniPlayer from '@/components/MiniPlayer'
 import PageHeader from '@/components/PageHeader'
-import { getAllContent } from '@/lib/contentStore'
+import { getAllContent, loadContent } from '@/lib/contentStore'
 import { getColorFromGradient, type ContentItem } from '@/lib/data'
 import { getDownloads, getFavorites, getHistory } from '@/lib/store'
 
@@ -16,7 +16,7 @@ export default function LibraryPage() {
   const [sets, setSets] = useState<string[][]>([[], [], []])
   const [all, setAll] = useState<ContentItem[]>([])
 
-  useEffect(() => { setSets([getFavorites(), getDownloads(), getHistory()]); setAll(getAllContent()) }, [])
+  useEffect(() => { setSets([getFavorites(), getDownloads(), getHistory()]); setAll(getAllContent()); loadContent().then(setAll) }, [])
 
   const ids = sets[tab]
   const items = ids.map(id => all.find(c => c.id === id)).filter(Boolean) as ContentItem[]

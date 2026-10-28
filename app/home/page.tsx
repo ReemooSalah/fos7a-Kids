@@ -6,7 +6,7 @@ import Link from 'next/link'
 import BottomNav from '@/components/BottomNav'
 import MiniPlayer from '@/components/MiniPlayer'
 import { homeCategories, getColorFromGradient, type ContentItem } from '@/lib/data'
-import { getAllContent } from '@/lib/contentStore'
+import { getAllContent, loadContent } from '@/lib/contentStore'
 import { arabicLetters } from '@/lib/letters'
 import { getLetterProgress, getProfile, getStars, isPremiumActive, type ChildProfile } from '@/lib/store'
 
@@ -23,7 +23,7 @@ export default function HomePage() {
     setProfile(getProfile()); setStars(getStars())
     const h = new Date().getHours()
     setGreeting(h < 12 ? 'صباح الخير' : h < 17 ? 'مساء الخير' : 'مساء النور')
-    setItems(getAllContent())
+    setItems(getAllContent()); loadContent().then(setItems)
     setLettersLearned(getLetterProgress().learned.length)
     setPremium(isPremiumActive())
   }, [])

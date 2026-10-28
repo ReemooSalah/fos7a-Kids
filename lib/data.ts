@@ -14,6 +14,8 @@ export interface ContentItem {
   description: string
   /** رابط ملف صوتي (مرفوع من الداشبورد) */
   audioUrl?: string
+  /** معرّف صوت ElevenLabs المستخدم في توليد الملف الصوتي */
+  voiceId?: string
   /** نص القصة الكامل — يُقرأ بالصوت الآلي عند عدم وجود ملف صوتي */
   body?: string
   /** ترتيب زمني (لقصص الأنبياء) */

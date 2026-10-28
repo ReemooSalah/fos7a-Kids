@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import PageHeader from '@/components/PageHeader'
-import { getAllContent } from '@/lib/contentStore'
+import { getAllContent, loadContent } from '@/lib/contentStore'
 import { arabicLetters } from '@/lib/letters'
 import { getBadges, getDailyLogs, getHistory, getLetterProgress, getProfile, getStars, type ChildProfile, type DayLog } from '@/lib/store'
 import type { ContentItem } from '@/lib/data'
@@ -20,8 +20,8 @@ export default function ParentDashboardPage() {
 
   useEffect(() => {
     setProfile(getProfile()); setLogs(getDailyLogs()); setStars(getStars()); setBadgeCount(getBadges().length)
-    const all = getAllContent()
-    setHistory(getHistory().map(id => all.find(c => c.id === id)).filter(Boolean) as ContentItem[])
+    const mapHistory = (all: ContentItem[]) => setHistory(getHistory().map(id => all.find(c => c.id === id)).filter(Boolean) as ContentItem[])
+    mapHistory(getAllContent()); loadContent().then(mapHistory)
     setLetters(getLetterProgress())
   }, [])
 

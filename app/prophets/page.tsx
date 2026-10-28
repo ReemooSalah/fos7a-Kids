@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import BottomNav from '@/components/BottomNav'
 import MiniPlayer from '@/components/MiniPlayer'
 import PageHeader from '@/components/PageHeader'
-import { getAllContent } from '@/lib/contentStore'
+import { getAllContent, loadContent } from '@/lib/contentStore'
 import { getColorFromGradient, type ContentItem } from '@/lib/data'
 import { getHistory, isPremiumActive } from '@/lib/store'
 
@@ -16,7 +16,8 @@ export default function ProphetsPage() {
   const [premium, setPremium] = useState(false)
 
   useEffect(() => {
-    setItems(getAllContent().filter(c => c.category === 'prophets').sort((a, b) => (a.order ?? 99) - (b.order ?? 99)))
+    const apply = (all: ContentItem[]) => setItems(all.filter(c => c.category === 'prophets').sort((a, b) => (a.order ?? 99) - (b.order ?? 99)))
+    apply(getAllContent()); loadContent().then(apply)
     setHistory(getHistory()); setPremium(isPremiumActive())
   }, [])
 

@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { getAllContent } from '@/lib/contentStore'
+import { getAllContent, loadContent } from '@/lib/contentStore'
 import { getColorFromGradient, type ContentItem } from '@/lib/data'
 import { arabicLetters } from '@/lib/letters'
 
@@ -15,7 +15,7 @@ function SearchContent() {
   const [all, setAll] = useState<ContentItem[]>([])
   const [recent, setRecent] = useState<string[]>([])
 
-  useEffect(() => { setAll(getAllContent()); try { setRecent(JSON.parse(localStorage.getItem('fos7a_recent_search') || '[]')) } catch {} }, [])
+  useEffect(() => { setAll(getAllContent()); loadContent().then(setAll); try { setRecent(JSON.parse(localStorage.getItem('fos7a_recent_search') || '[]')) } catch {} }, [])
 
   const q = query.trim()
   const norm = (s: string) => s.replace(/[ً-ْ]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه')

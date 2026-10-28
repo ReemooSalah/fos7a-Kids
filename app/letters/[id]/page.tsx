@@ -8,6 +8,7 @@ import { arabicLetters, letterById, letterIndex } from '@/lib/letters'
 import { getColorFromGradient, getCoverColors } from '@/lib/data'
 import { playLetterSound, speak, stopSpeaking } from '@/lib/speech'
 import { addStars, markLetterLearned, markLetterWritten } from '@/lib/store'
+import { loadLetterAudio } from '@/lib/contentStore'
 
 type Tab = 'learn' | 'write' | 'quiz'
 
@@ -21,6 +22,8 @@ export default function LetterPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [quizAnswer, setQuizAnswer] = useState<string | null>(null)
   const [quizOptions, setQuizOptions] = useState<{ word: string; emoji: string; correct: boolean }[]>([])
+
+  useEffect(() => { loadLetterAudio() }, [])
 
   useEffect(() => {
     if (!letter) return

@@ -7,7 +7,7 @@ import BottomNav from '@/components/BottomNav'
 import MiniPlayer from '@/components/MiniPlayer'
 import Paywall from '@/components/Paywall'
 import { categoryLabels, getCoverColors, type ContentItem } from '@/lib/data'
-import { getAllContent } from '@/lib/contentStore'
+import { getAllContent, loadContent } from '@/lib/contentStore'
 import { getDownloads, getFavorites, isPremiumActive, startTrack, toggleDownload, toggleFavorite } from '@/lib/store'
 
 export default function ContentDetailPage() {
@@ -21,7 +21,7 @@ export default function ContentDetailPage() {
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
-    setItems(getAllContent()); setPremium(isPremiumActive())
+    setItems(getAllContent()); loadContent().then(setItems); setPremium(isPremiumActive())
     setIsFav(getFavorites().includes(id)); setIsDownloaded(getDownloads().includes(id))
     setLoaded(true)
   }, [id])
